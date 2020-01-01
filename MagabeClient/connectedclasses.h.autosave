@@ -1,0 +1,119 @@
+#ifndef CONNECTEDCLASSES_H
+#define CONNECTEDCLASSES_H
+///*-----------------Template--------------------------*/
+
+//struct Template{
+//    constexpr static const char *className = "";
+
+//    struct Signals{
+
+
+//    };
+
+//    struct Slots{
+
+//    };
+//};
+
+struct ConnectedClasses{
+
+    /*-----------------AuthenticationController--------------------------*/
+
+    struct AuthenticationController{
+        constexpr static const char *className = "AuthenticationController";
+
+        struct Signals{
+            constexpr static const char *loginRequired = "loginRequired";
+            constexpr static const char *signUpSucceeded = "signUpSucceeded";
+            constexpr static const char *signUpFailed = "signUpFailed";
+            constexpr static const char *authenticationSucceded = "authenticationSucceded";
+            constexpr static const char *authenticationFailed = "authenticationFailed";
+            constexpr static const char *loginSucceeded = "loginSucceeded";
+            constexpr static const char *loginFailed = "loginFailed";
+            constexpr static const char *logOutSucceeded = "logOutSucceeded";
+            constexpr static const char *logOutFailed ="logOutFailed";
+            constexpr static const char *profilePictureRequired = "profilePictureRequired";
+            constexpr static const char *profilePictureUploaded = "profilePictureUploaded";
+            constexpr static const char *profilePictureUploadingFailed = "profilePictureUploadingFailed";
+            constexpr static const char *profilePictureUploadingNotFinished ="profilePictureUploadingNotFinished";
+            constexpr static const char *profilePictureChanged = "profilePictureChanged";
+
+        };
+
+        struct Slots{
+
+        };
+    };
+
+    /*-----------------MagabeClientApp--------------------------*/
+
+    struct MagabeClientApp{
+        constexpr static const char *className = "MagabeClientApp";
+
+        struct Signals{
+            constexpr static const char *loginRequired = "loginRequired";
+            constexpr static const char *signUpSucceeded = "signUpSucceeded";
+            constexpr static const char *signUpFailed = "signUpFailed";
+            constexpr static const char *authenticationSucceded = "authenticationSucceded";
+            constexpr static const char *authenticationFailed = "authenticationFailed";
+            constexpr static const char *loginSucceeded = "loginSucceeded";
+            constexpr static const char *loginFailed = "loginFailed";
+            constexpr static const char *logOutSucceeded = "logOutSucceeded";
+            constexpr static const char *logOutFailed ="logOutFailed";
+            constexpr static const char *profilePictureRequired = "profilePictureRequired";
+            constexpr static const char *profilePictureUploaded = "profilePictureUploaded";
+            constexpr static const char *profilePictureUploadingFailed = "profilePictureUploadingFailed";
+            constexpr static const char *profilePictureUploadingNotFinished ="profilePictureUploadingNotFinished";
+            constexpr static const char *profilePictureChanged = "profilePictureChanged";
+            constexpr static const char *connected = "connected";
+            constexpr static const char *disconnected = "disconnected";
+            constexpr static const char *connectTimeout = "connectTimeout";
+
+
+
+
+        };
+
+        struct Slots{
+
+        };
+    };
+    ///*-----------------MagabeClient--------------------------*/
+
+    struct MagabeClient{
+        constexpr static const char *className = "MagabeClient";
+
+        struct Signals{
+            constexpr static const char *connectedToMagabeserver = "connectedToMagabeserver";
+            constexpr static const char *disconnectedFromMagabeServer = "disconnectedFromMagabeServer";
+            constexpr static const char *connectTimeout = "connectTimeout";
+
+
+        };
+
+        struct Slots{
+            constexpr static const char *onConnectToServer = "onConnectToServer";
+            constexpr static const char *disconnect = "disconnect";
+
+        };
+    };
+
+    ///*-----------------MagabeClientManager--------------------------*/
+    
+    struct MagabeClientManager{
+        constexpr static const char *className = "MagabeClientManager";
+    
+        struct Signals{
+           constexpr static const char *connectToServer = "connectToServer";
+            constexpr static const char *disconnectFromServer = "disconnectFromServer";
+    
+    
+        };
+    
+        struct Slots{
+    
+        };
+    };
+};
+
+#endif // CONNECTEDCLASSES_H

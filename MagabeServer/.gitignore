@@ -1,0 +1,14 @@
+android/android.iml
+android/gradle/ 
+android/gradle.properties 
+android/gradle.properties~
+android/gradlew*
+android/local.properties 
+android/res/
+android/local.properties~
+android/gradlew.bat 
+android/build.gradle 
+android/.build/
+android/.gradle/
+
+MagabeServer.pro.user*

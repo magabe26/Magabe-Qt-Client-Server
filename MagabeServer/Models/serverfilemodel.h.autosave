@@ -1,0 +1,30 @@
+#ifndef SERVER_FILE_MODEL
+#define SERVER_FILE_MODEL
+
+#include <QObject>
+#include "Models/model.h"
+#include "Models/statistticsmodel.h"
+
+class ServerFileModel : public Model
+{
+    Q_OBJECT
+public:
+    explicit ServerFileModel(QObject *parent = nullptr);
+    QString getFilePath(int userId);
+    QString getOrginalFileName(int userId);
+    QString getNewFileName(int userId);
+    int getUserId(QString fileName);
+    bool  recordFile(int userId,const QString &filePath,const QString &orginalFileName
+                     ,const QString &newFileName ,const QString &timestamp);
+    bool deleteFile(const QString &fileName);
+    bool isFileExist(int userId, QString orginalFileName);
+    QString getFilePath(QString fileName);
+signals:
+
+public slots:
+private:
+    void createTable();
+
+};
+
+#endif // SERVER_FILE_MODEL

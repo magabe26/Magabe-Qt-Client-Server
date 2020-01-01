@@ -1,0 +1,172 @@
+#include "Models/serverfilesmodel.h"
+
+/**
+ * @brief ServerFileModel::UploadedImagesAndFilesModel
+ * @param parent
+ */
+ServerFileModel::UploadedImagesAndFilesModel(QObject *parent) : Model(parent)
+{
+  setTablename("uploaded_images_and_files");
+  setUserIdColumnName("userId");
+  createTable();
+}
+
+/**
+ * @brief ServerFileModel::getFilePath
+ * @param userId
+ * @return
+ */
+QString ServerFileModel::getFilePath(int userId)
+{
+  return getRecordUsingId("filePath",userId,"failed to get filePath");
+}
+
+/**
+ * @brief ServerFileModel::getOrginalFileName
+ * @param userId
+ * @return
+ */
+QString ServerFileModel::getOrginalFileName(int userId)
+{
+  return getRecordUsingId("orginalFileName",userId,"failed to get orginalFileName");
+}
+
+/**
+ * @brief ServerFileModel::getNewFileName
+ * @param userId
+ * @return
+ */
+QString ServerFileModel::getNewFileName(int userId)
+{
+  return getRecordUsingId("newFileName",userId,"failed to get newFileName");
+
+}
+
+/**
+ * @brief ServerFileModel::getUserId
+ * @param fileName
+ * @return
+ */
+int ServerFileModel::getUserId(const QString &fileName)
+{
+  QString results =  getRecord("userId","orginalFileName",fileName,"int ServerFileModel::getUserId(QString fileName)");
+
+  if(!results.isEmpty() && results.toInt() != 0){
+
+      return results.toInt();
+    }else{
+
+      return getRecord("userId","newFileName",fileName,"int ServerFileModel::getUserId(QString fileName)").toInt();
+    }
+
+}
+
+/**
+ * @brief ServerFileModel::getFilePath
+ * @param fileName
+ * @return
+ */
+QString ServerFileModel::getFilePath(const QString &fileName)
+{
+  QString results =  getRecord("filePath","orginalFileName",fileName,"int ServerFileModel::filePath(QString fileName)");
+
+  if(!results.isEmpty()){
+
+      return results;
+    }else{
+
+      return getRecord("filePath","newFileName",fileName,"int ServerFileModel::filePath(QString fileName)");
+    }
+
+}
+
+/**
+ * @brief ServerFileModel::recordImageOrFileToDb
+ * @param userId
+ * @param filePath
+ * @param orginalFileName
+ * @param newFileName
+ * @param timestamp
+ * @return
+ */
+bool ServerFileModel::recordFile(int userId, const QString &filePath, const QString &orginalFileName, const QString &newFileName, const QString &timestamp)
+{
+  bool isFilePreviousExist = isFileExist(userId,orginalFileName);
+  QString query = QString("INSERT INTO \'%1\' (\'userId\',"
+                          "\'filePath\',\'orginalFileName\',"
+                          "\'newFileName\',\'timestamp\')"
+                          "VALUES (\'%2\',\'%3\',"
+                          "\'%4\',\'%5\',\'%6\')")
+      .arg(tablename()).arg(QString::number(userId))
+      .arg(filePath).arg(orginalFileName)
+      .arg(newFileName).arg(timestamp) ;
+
+  if(m_db->excuteSqlQuery(query,"--> New ImageOrFile recorded To Db","--> Failed to recorded  new ImageOrFile To Db  ")){
+      if(!isFilePreviousExist){
+          StatisticsModel().incrementTotal(tablename());
+        }
+
+      return true;
+    }else{
+      return false;
+    }
+}
+
+/**
+ * @brief ServerFileModel::deleteImageOrFile
+ * @param fileName
+ * @return
+ */
+bool ServerFileModel::deleteFile(const QString &fileName)
+{
+  QString filePath;
+
+  filePath = getRecord("filePath","orginalFileName",fileName,"bool ServerFileModel::deleteImageOrFile(QString fileName)");
+  if(filePath.isEmpty()){
+      filePath = getRecord("filePath","newFileName",fileName,"bool ServerFileModel::deleteImageOrFile(QString fileName)");
+    }
+
+  return deleteFileFromDisc(filePath);
+}
+
+/**
+ * @brief ServerFileModel::isFileExist
+ * @param userId
+ * @param orginalFileName
+ * @return
+ */
+bool ServerFileModel::isFileExist(int userId, const QString &orginalFileName)
+{
+  if(orginalFileName == getRecord("orginalFileName","orginalFileName",orginalFileName,"bool ServerFileModel::isFileExist(int userId,QString fileName)")
+     && userId == getUserId(orginalFileName)){
+      return true;
+    }else{
+      return false;
+    }
+}
+
+/**
+ * @brief ServerFileModel::createTable
+ */
+void ServerFileModel::createTable()
+{
+
+  QString query = "CREATE TABLE IF NOT EXISTS \'uploaded_images_and_files\' ( "
+                  "\'userId\' INT(11)  NOT NULL,"
+                  "\'filePath' varchar(255) NOT NULL,"
+                  "\'orginalFileName\' varchar(150) NOT NULL,"
+                  "\'newFileName\' varchar(150) NOT NULL PRIMARY KEY UNIQUE,"
+                  "\'timestamp\' int(11) NOT NULL"
+                  " )";
+
+
+  if(m_db->excuteSqlQuery(query,"uploaded_images_and_files table created Sucessfull","Failed to create uploaded_images_and_files table")){
+      StatisticsModel  statisticsModel;
+      print("initilizing "+ tablename() +" statistics ...");
+      if(statisticsModel.initStatistic(tablename(),0)){//it will not overwrite if record is already created
+          print(tablename() +" statistics initilized ...");
+      }else{
+          print(tablename() +" statistics  already initilized ...");
+      }
+    }
+}

@@ -1,0 +1,12 @@
+#ifndef GETMESSAGESMETHODTYPE_H
+#define GETMESSAGESMETHODTYPE_H
+
+enum class MessageType{
+    Sent = 0xcf6, //3318
+    Received,
+    SentOrReceived,
+    Read,
+    UnRead
+};
+
+#endif // GETMESSAGESMETHODTYPE_H

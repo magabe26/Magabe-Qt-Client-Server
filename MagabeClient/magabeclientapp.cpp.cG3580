@@ -1,0 +1,1349 @@
+#include "magabeclientapp.h"
+#include "debug.h"
+#include <QDebug>
+#include "Helpers/connectionpipe.h"
+#include "Client/authentication.h"
+#include "ControllerIdentifier/controlleridentifier.h"
+#include "security.h"
+#include "registeredobjects.h"
+#include "Helpers/fileutils.h"
+#include "Controllers/authenticationcontroller.h"
+#include "Helpers/datawritter.h"
+#include <QList>
+
+
+enum class GetMessagesMethodType{
+    GetSentMessages = 0xcf6, //3318
+    GetReceivedMessages,
+    GetMessages,
+    GetReadMessages,
+    GetUnReadMessages
+};
+
+
+/*---------------------------------getUserInfo---------------------------------------------*/
+struct UserInfoCallbackWrapper{
+    QString username;
+    void (*cb)(const QString& username,const UserInfo& info,const UserInfoError& error);
+    bool operator ==(const UserInfoCallbackWrapper& other){
+        return (this->username == other.username);
+    }
+};
+
+class UserInfoCallbacks{
+public:
+    void invokeCallback(const QString& username,const UserInfo& info,const UserInfoError& error = UserInfoError::NoError){
+        UserInfoCallbackWrapper callbackWrapper;
+        callbackWrapper.username = username;
+        for(int index = callbacks_.indexOf(callbackWrapper);
+            index != -1 ;
+            index = callbacks_.indexOf(callbackWrapper)){
+            auto callbackWrapper = callbacks_.takeAt(index);
+            if(callbackWrapper.cb){
+                callbackWrapper.cb(username,info,error);
+            }
+        }
+    }
+
+    void registerCallback(const QString& username,void (*cb)(const QString& username,const UserInfo& info,const UserInfoError& error)){
+        if((!username.isEmpty()) && (cb)){
+            UserInfoCallbackWrapper callbackWrapper;
+            callbackWrapper.username = username;
+            callbackWrapper.cb = cb;
+            callbacks_.append(callbackWrapper);
+        }
+    }
+
+    void removeAllCallbacks(){
+        foreach (auto callbackWrapper, callbacks_) {
+            UserInfo info;
+            const  QString username = callbackWrapper.username;
+            info.setUsername(username);
+            invokeCallback(username,info,UserInfoError::ConnectionErrors);
+        }
+        callbacks_.clear();
+    }
+
+
+private:
+    QList<UserInfoCallbackWrapper> callbacks_;
+};
+/*----------------------------------downloadProfilePicture--------------------------------------------*/
+
+struct ProfilePictureDownloadCallbackWrapper{
+    QString username;
+    void (*cb)(const QString& username,const QString& profilePicturePath,const MagabeClientApp::ProfilePictureDownloadError error);
+    bool operator ==(const ProfilePictureDownloadCallbackWrapper& other){
+        return (this->username == other.username);
+    }
+};
+
+class ProfilePictureDownloadCallbacks{
+public:
+    void invokeCallback(const QString& username,const QString& profilePicturePath,const MagabeClientApp::ProfilePictureDownloadError& error = MagabeClientApp::ProfilePictureDownloadError::NoError){
+        ProfilePictureDownloadCallbackWrapper callbackWrapper;
+        callbackWrapper.username = username;
+        for(int index = callbacks_.indexOf(callbackWrapper);
+            index != -1 ;
+            index = callbacks_.indexOf(callbackWrapper)){
+            auto callbackWrapper = callbacks_.takeAt(index);
+            if(callbackWrapper.cb){
+                callbackWrapper.cb(username,profilePicturePath,error);
+            }
+        }
+    }
+
+    void registerCallback(const QString& username,void (*cb)(const QString& username,const QString& profilePicturePath,const MagabeClientApp::ProfilePictureDownloadError error)){
+        if((!username.isEmpty()) && (cb)){
+            ProfilePictureDownloadCallbackWrapper callbackWrapper;
+            callbackWrapper.username = username;
+            callbackWrapper.cb = cb;
+            callbacks_.append(callbackWrapper);
+        }
+    }
+
+    void removeAllCallbacks(){
+        foreach (auto callbackWrapper, callbacks_) {
+            const  QString username = callbackWrapper.username;
+            invokeCallback(username,"",MagabeClientApp::ProfilePictureDownloadError::ConnectionErrors);
+        }
+        callbacks_.clear();
+    }
+
+
+private:
+    QList<ProfilePictureDownloadCallbackWrapper> callbacks_;
+};
+
+
+/** ----------------------AbstractGetMessagesCallbackWrapper-------------------------
+ * @brief The AbstractGetMessagesCallbackWrapper struct
+ */
+struct AbstractGetMessagesCallbackWrapper{
+    QString tag;
+    void *cb;
+    GetMessagesMethodType methodType;
+    bool operator ==(const AbstractGetMessagesCallbackWrapper& other){//use only tags
+        return (this->tag == other.tag);
+    }
+};
+
+class AbstractGetMessagesCallbacks{
+public:
+    void invokeCallback(const QString& tag,const QString& jsonMessages
+                        ,MagabeClientApp::OnGetMessagesError error = MagabeClientApp::OnGetMessagesError::NoError){
+
+        AbstractGetMessagesCallbackWrapper callbackWrapper;
+        callbackWrapper.tag = tag;
+        for(int index = callbacks_.indexOf(callbackWrapper);
+            index != -1 ;
+            index = callbacks_.indexOf(callbackWrapper)){
+            auto callbackWrapper = callbacks_.takeAt(index);
+            if(callbackWrapper.cb){
+                switch (callbackWrapper.methodType) {
+                case  GetMessagesMethodType::GetSentMessages:{
+
+                    auto cb = reinterpret_cast<MagabeClientApp::GetSentMessagesCallback>(callbackWrapper.cb);
+                    if(cb){
+                        SentMessages sentMessages(jsonMessages);
+                        cb(sentMessages,error);
+                    }else{
+                        qWarning() << QString("AbstractGetMessagesCallbacks::invokeCallback | Error, Cast to %1 failed").arg("GetSentMessagesCallback");
+                    }
+                    break;
+                }
+                case  GetMessagesMethodType::GetReceivedMessages:{
+                    auto cb = reinterpret_cast<MagabeClientApp::GetReceivedMessagesCallback>(callbackWrapper.cb);
+                    if(cb){
+                        ReceivedMessages receivedMessages(jsonMessages);
+                        cb(receivedMessages,error);
+                    }else{
+                        qWarning() << QString("AbstractGetMessagesCallbacks::invokeCallback | Error, Cast to %1 failed").arg("GetReceivedMessagesCallback");
+                    }
+                    break;
+                }
+                case  GetMessagesMethodType::GetMessages:{
+                    auto cb = reinterpret_cast<MagabeClientApp::GetMessagesCallback>(callbackWrapper.cb);
+                    if(cb){
+                        Messages messages(jsonMessages);
+                        cb(messages,error);
+                    }else{
+                        qWarning() << QString("AbstractGetMessagesCallbacks::invokeCallback | Error, Cast to %1 failed").arg("GetMessagesCallback");
+                    }
+                    break;
+                }
+                case  GetMessagesMethodType::GetReadMessages:{
+                    auto cb = reinterpret_cast<MagabeClientApp::GetReadMessagesCallback>(callbackWrapper.cb);
+                    if(cb){
+                        ReadMessages readMessages(jsonMessages);
+                        cb(readMessages,error);
+                    }else{
+                        qWarning() << QString("AbstractGetMessagesCallbacks::invokeCallback | Error, Cast to %1 failed").arg("GetReadMessagesCallback");
+                    }
+                    break;
+                }
+                case  GetMessagesMethodType::GetUnReadMessages:{
+                    auto cb = reinterpret_cast<MagabeClientApp::GetUnReadMessagesCallback>(callbackWrapper.cb);
+                    if(cb){
+                        UnReadMessages unReadMessages(jsonMessages);
+                        cb(unReadMessages,error);
+                    }else{
+                        qWarning() << QString("AbstractGetMessagesCallbacks::invokeCallback | Error, Cast to %1 failed").arg("GetUnReadMessagesCallback");
+                    }
+                    break;
+                }
+
+                }//switch
+            }//if
+        }//for
+    }
+
+    void registerCallback(const QString& tag,void *cb,GetMessagesMethodType methodType){
+        if((!tag.isEmpty()) && (cb)){
+            AbstractGetMessagesCallbackWrapper callbackWrapper;
+            callbackWrapper.tag = tag;
+            callbackWrapper.cb = cb;
+            callbackWrapper.methodType = methodType;
+            callbacks_.append(callbackWrapper);
+        }
+    }
+
+    void removeAllCallbacks(){
+        foreach (auto callbackWrapper, callbacks_) {
+            invokeCallback(callbackWrapper.tag,"",MagabeClientApp::OnGetMessagesError::ConnectionErrors);
+        }
+        callbacks_.clear();
+    }
+
+    bool containsTag(const QString& tag){
+        AbstractGetMessagesCallbackWrapper wrapper;
+        wrapper.tag = tag;
+        return callbacks_.contains(wrapper);
+    }
+
+    int count(){
+        return callbacks_.count();
+    }
+
+private:
+    QList<AbstractGetMessagesCallbackWrapper> callbacks_;
+};
+
+/** ----------------------SendMessageCallbacksWrapper-------------------------
+ * @brief The SendMessageCallbacksWrapper struct
+ */
+struct SendMessageCallbacksWrapper{
+    QString tag;
+    QString receiver;
+    MagabeClientApp::SendMessageCallback cb;
+    bool operator ==(const SendMessageCallbacksWrapper& other){//use only tags
+        return (this->tag == other.tag);
+    }
+};
+
+class SendMessageCallbacks{
+public:
+    void invokeCallback(const QString& tag,const QString& jsonMessage
+                        ,MagabeClientApp::OnSendMessageError error = MagabeClientApp::OnSendMessageError::NoError){
+
+        SendMessageCallbacksWrapper callbackWrapper;
+        callbackWrapper.tag = tag;
+        for(int index = callbacks_.indexOf(callbackWrapper);
+            index != -1 ;
+            index = callbacks_.indexOf(callbackWrapper)){
+            auto callbackWrapper = callbacks_.takeAt(index);
+            if(callbackWrapper.cb){
+                callbackWrapper.cb(callbackWrapper.receiver,Message::fromJson(jsonMessage),error);
+            }//if
+        }//for
+    }
+
+    void registerCallback(const QString& tag,const QString& receiver,MagabeClientApp::SendMessageCallback cb){
+        if((!tag.isEmpty()) && (cb)){
+            SendMessageCallbacksWrapper callbackWrapper;
+            callbackWrapper.tag = tag;
+            callbackWrapper.cb = cb;
+            callbackWrapper.receiver = receiver;
+            callbacks_.append(callbackWrapper);
+        }
+    }
+
+    void removeAllCallbacks(){
+        foreach (auto callbackWrapper, callbacks_) {
+            invokeCallback(callbackWrapper.tag,"",MagabeClientApp::OnSendMessageError::ConnectionErrors);
+        }
+        callbacks_.clear();
+    }
+
+    bool containsTag(const QString& tag){
+        SendMessageCallbacksWrapper wrapper;
+        wrapper.tag = tag;
+        return callbacks_.contains(wrapper);
+    }
+
+    int count(){
+        return callbacks_.count();
+    }
+
+private:
+    QList<SendMessageCallbacksWrapper> callbacks_;
+};
+
+/** ----------------------FetchUserNamesCallbacksWrapper-------------------------
+ * @brief The FetchUserNamesCallbacksWrapper struct
+ */
+struct FetchUserNamesCallbacksWrapper{
+    QString tag;
+    MagabeClientApp::FetchUserNamesCallback cb;
+    bool operator ==(const FetchUserNamesCallbacksWrapper& other){//use only tags
+        return (this->tag == other.tag);
+    }
+};
+
+class FetchUserNamesCallbacks{
+public:
+    void invokeCallback(const QString& tag,const QString& jsonUserNames){
+        QMap<unsigned long,QString> map;
+
+        Extras extras; extras.addExtras("jobj",jsonUserNames);
+        auto obj = extras.getJsonObjectExtras("jobj");
+        if(!obj.isEmpty()){
+            auto itr = obj.begin();
+            while (itr != obj.end()) {
+                auto id = itr.key().toULong();
+                auto username = itr.value().toString();
+                map.insert(id,username);
+                itr++;
+            }
+        }
+        FetchUserNamesCallbacksWrapper callbackWrapper;
+        callbackWrapper.tag = tag;
+        for(int index = callbacks_.indexOf(callbackWrapper);
+            index != -1 ;
+            index = callbacks_.indexOf(callbackWrapper)){
+            auto callbackWrapper = callbacks_.takeAt(index);
+            if(callbackWrapper.cb){
+                callbackWrapper.cb(map);
+            }//if
+        }//for
+    }
+
+    void registerCallback(const QString& tag,MagabeClientApp::FetchUserNamesCallback cb){
+        if((!tag.isEmpty()) && (cb)){
+            FetchUserNamesCallbacksWrapper callbackWrapper;
+            callbackWrapper.tag = tag;
+            callbackWrapper.cb = cb;
+            callbacks_.append(callbackWrapper);
+        }
+    }
+
+    void removeAllCallbacks(){
+        foreach (auto callbackWrapper, callbacks_) {
+            invokeCallback(callbackWrapper.tag,"");
+        }
+        callbacks_.clear();
+    }
+
+    bool containsTag(const QString& tag){
+        FetchUserNamesCallbacksWrapper wrapper;
+        wrapper.tag = tag;
+        return callbacks_.contains(wrapper);
+    }
+
+    int count(){
+        return callbacks_.count();
+    }
+
+private:
+    QList<FetchUserNamesCallbacksWrapper> callbacks_;
+};
+/** -----------------MagabeClientApp-------------------------------
+ * @brief MagabeClientApp::MagabeClientApp
+ * @param parent
+ */
+MagabeClientApp::MagabeClientApp(QObject *parent) : QObject(parent)
+  , authenticated_(false)
+  , userInfoCallbacks_(new UserInfoCallbacks)
+  , profilePictureDownloadCallbacks_(new ProfilePictureDownloadCallbacks)
+  , abstractGetMessagesCallbacks_(new AbstractGetMessagesCallbacks)
+  , sendMessageCallbacks_(new SendMessageCallbacks)
+  , fetchUserNamesCallbacks_(new FetchUserNamesCallbacks)
+{
+
+    ConnectionPipe::registerObject(this);
+
+    //connect slots
+    ConnectionPipe::connectSlot(RegisteredObjects::AuthenticationController::className,RegisteredObjects::AuthenticationController::Signals::userInfo,this,RegisteredObjects::MagabeClientApp::Slots::onUserInfo);
+    ConnectionPipe::connectSlot(RegisteredObjects::AuthenticationController::className,RegisteredObjects::AuthenticationController::Signals::userNotFound,this,RegisteredObjects::MagabeClientApp::Slots::onUserNotFound);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClient::className,RegisteredObjects::MagabeClient::Signals::connectedToMagabeserver,this,RegisteredObjects::MagabeClientApp::Slots::onConnected);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClient::className,RegisteredObjects::MagabeClient::Signals::disconnectedFromMagabeServer,this,RegisteredObjects::MagabeClientApp::Slots::onDisconnected);
+    ConnectionPipe::connectSlot(RegisteredObjects::AuthenticationController::className,RegisteredObjects::AuthenticationController::Signals::userProfilePictureDownloadFinished,this,RegisteredObjects::MagabeClientApp::Slots::onUserProfilePictureDownloadFinished);
+    ConnectionPipe::connectSlot(RegisteredObjects::AuthenticationController::className,RegisteredObjects::AuthenticationController::Signals::profilePictureDownloadFailed,this,RegisteredObjects::MagabeClientApp::Slots::onProfilePictureDownloadFailed);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::signUpSucceeded,this,RegisteredObjects::MagabeClientApp::Slots::onSignUpSucceeded);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::signUpFailed,this,RegisteredObjects::MagabeClientApp::Slots::onSignUpFailed);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::authenticationSucceded,this,RegisteredObjects::MagabeClientApp::Slots::onAuthenticationSucceded);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::authenticationFailed,this,RegisteredObjects::MagabeClientApp::Slots::onAuthenticationFailed);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::loginSucceeded,this,RegisteredObjects::MagabeClientApp::Slots::onLoginSucceeded);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::loginFailed,this,RegisteredObjects::MagabeClientApp::Slots::onLoginFailed);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::logOutSucceeded,this,RegisteredObjects::MagabeClientApp::Slots::onLogOutSucceeded);
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::connectTimeout,this,RegisteredObjects::MagabeClientApp::Slots::onConnectTimeout);
+    ConnectionPipe::connectSlot(RegisteredObjects::ConversationController::className,RegisteredObjects::ConversationController::Signals::messagesReceived,this,RegisteredObjects::MagabeClientApp::Slots::onMessagesReceived);
+    ConnectionPipe::connectSlot(RegisteredObjects::ConversationController::className,RegisteredObjects::ConversationController::Signals::getMessageError,this,RegisteredObjects::MagabeClientApp::Slots::onGetMessageError);
+    ConnectionPipe::connectSlot(RegisteredObjects::ConversationController::className,RegisteredObjects::ConversationController::Signals::messageSent,this,RegisteredObjects::MagabeClientApp::Slots::onMessageSent);
+    ConnectionPipe::connectSlot(RegisteredObjects::ConversationController::className,RegisteredObjects::ConversationController::Signals::messageNotSent,this,RegisteredObjects::MagabeClientApp::Slots::onMessageNotSent);
+    ConnectionPipe::connectSlot(RegisteredObjects::ConversationController::className,RegisteredObjects::ConversationController::Signals::userNamesReceived,this,RegisteredObjects::MagabeClientApp::Slots::onUserNamesReceived);
+
+
+
+    //Note: signals are connected in AuthenticationController since controllers have short life span
+
+    /*--------------------------------TESTS-------------------------------------------*/
+
+
+
+#ifdef MAGABE_TESTS
+
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::loginRequired,this,"onLoginRequired");
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::profilePictureRequired,this,"onProfilePictureRequired");
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::profilePictureUploaded,this,"onProfilePictureUploaded");
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::profilePictureUploadingFailed,this,"onProfilePictureUploadingFailed");
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::profilePictureUploadingNotFinished,this,"onProfilePictureUploadingNotFinished");
+    ConnectionPipe::connectSlot(RegisteredObjects::MagabeClientApp::className,RegisteredObjects::MagabeClientApp::Signals::profilePictureChanged,this,"onProfilePictureChanged");
+
+
+#endif
+    /*--------------------------------TESTS-------------------------------------------*/
+
+}
+
+MagabeClientApp::~MagabeClientApp()
+{
+    ConnectionPipe::unRegisterObject(this);
+    if(userInfoCallbacks_){
+        delete userInfoCallbacks_;
+        userInfoCallbacks_ = nullptr;
+    }
+
+    if(profilePictureDownloadCallbacks_){
+        delete profilePictureDownloadCallbacks_;
+        profilePictureDownloadCallbacks_ = nullptr;
+    }
+
+    if(abstractGetMessagesCallbacks_){
+        delete abstractGetMessagesCallbacks_;
+        abstractGetMessagesCallbacks_ = nullptr;
+    }
+
+    if(sendMessageCallbacks_){
+        delete sendMessageCallbacks_;
+        sendMessageCallbacks_ = nullptr;
+    }
+
+    if(fetchUserNamesCallbacks_){
+        delete fetchUserNamesCallbacks_;
+        fetchUserNamesCallbacks_= nullptr;
+    }
+}
+
+QString MagabeClientApp::authenticationErrorToString(AuthenticationError authenticationError){
+    switch (authenticationError) {
+    case AuthenticationError::NoError :return "NoError";
+    case AuthenticationError::UserAlreadyAuthenticatedError: return "UserAlreadyAuthenticatedError";
+    case AuthenticationError::IllegalAppUsersStateError: return "IllegalAppUsersStateError";
+    case AuthenticationError::UserNotRegisteredError: return "UserNotRegisteredError";
+    case AuthenticationError::UserIsBlacklistedError: return "UserIsBlacklistedError";
+    case AuthenticationError::UnknownError: return "UnknownError";
+    case AuthenticationError::UserNameNotSetError: return "UserNameNotSetError";
+    case AuthenticationError::AuthKeyNotSetError: return "AuthKeyNotSetError";
+    case AuthenticationError::PasswordNotSetError: return "PasswordNotSetError";
+    case AuthenticationError::InvalidCredentialsError: return "InvalidCredentialsError";
+    default: return "NoError";
+    }
+}
+
+void MagabeClientApp::signUp(const QString &username, const QString &firstName, const QString &lastName, const QString &dateOfBirth, QChar gender, const QString &password, const QString &email)
+{
+    Authentication::signUp(username, firstName,lastName,dateOfBirth,gender, password, email);
+}
+
+void MagabeClientApp::login(const QString &username, const QString &password)
+{
+    Authentication::login(username,password);
+}
+
+void MagabeClientApp::logOut()
+{
+    Authentication:: logOut();
+}
+
+bool MagabeClientApp::isAuthenticated() const
+{
+    return authenticated_;
+}
+
+void MagabeClientApp::getSentMessages(const Message &start
+                                      , GetSentMessagesCallback cb
+                                      , int maxNoOfMessages, bool includeStartMessage, const MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetSentMessages,start,maxNoOfMessages,includeStartMessage,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetSentMessages);
+        sendRequest(data);
+    }else{
+        cb(SentMessages(),OnGetMessagesError::ConnectionErrors);
+    }
+}
+
+void MagabeClientApp::getSentMessages(const Conversation &conversation
+                                      , GetSentMessagesCallback cb
+                                      , int maxNoOfMessages, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetSentMessages,conversation,maxNoOfMessages,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetSentMessages);
+        sendRequest(data);
+    }else{
+        cb(SentMessages(),OnGetMessagesError::ConnectionErrors);
+    }
+
+}
+
+void MagabeClientApp::getReceivedMessages(const Message &start, GetReceivedMessagesCallback cb
+                                          , int maxNoOfMessages
+                                          , bool includeStartMessage, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetReceivedMessages,start,maxNoOfMessages,includeStartMessage,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetReceivedMessages);
+        sendRequest(data);
+    }else{
+        cb(ReceivedMessages(),OnGetMessagesError::ConnectionErrors);
+    }
+
+}
+
+void MagabeClientApp::getReceivedMessages(const Conversation &conversation
+                                          , GetReceivedMessagesCallback cb
+                                          , int maxNoOfMessages, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetReceivedMessages,conversation,maxNoOfMessages,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetReceivedMessages);
+        sendRequest(data);
+    }else{
+        cb(ReceivedMessages(),OnGetMessagesError::ConnectionErrors);
+    }
+
+}
+
+void MagabeClientApp::getMessages(const Message &start
+                                  , GetMessagesCallback cb
+                                  , int maxNoOfMessages, bool includeStartMessage, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetMessages,start,maxNoOfMessages,includeStartMessage,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetMessages);
+        sendRequest(data);
+    }else{
+        cb(Messages(),OnGetMessagesError::ConnectionErrors);
+    }
+
+}
+
+void MagabeClientApp::getMessages(const Conversation &conversation
+                                  , GetMessagesCallback cb
+                                  , int maxNoOfMessages, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetMessages,conversation,maxNoOfMessages,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetMessages);
+        sendRequest(data);
+    }else{
+        cb(Messages(),OnGetMessagesError::ConnectionErrors);
+    }
+
+}
+
+void MagabeClientApp::getReadMessages(const Message &start
+                                      , GetReadMessagesCallback cb
+                                      , int maxNoOfMessages, bool includeStartMessage, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetReadMessages,start,maxNoOfMessages,includeStartMessage,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetReadMessages);
+        sendRequest(data);
+    }else{
+        cb(ReadMessages(),OnGetMessagesError::ConnectionErrors);
+    }
+
+}
+
+void MagabeClientApp::getReadMessages(const Conversation &conversation
+                                      , GetReadMessagesCallback cb
+                                      , int maxNoOfMessages, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetReadMessages,conversation,maxNoOfMessages,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetReadMessages);
+        sendRequest(data);
+    }else{
+        cb(ReadMessages(),OnGetMessagesError::ConnectionErrors);
+    }
+
+}
+
+void MagabeClientApp::getUnReadMessages(const Message &start
+                                        , GetUnReadMessagesCallback cb
+                                        , int maxNoOfMessages, bool includeStartMessage, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetUnReadMessages,start,maxNoOfMessages,includeStartMessage,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetUnReadMessages);
+        sendRequest(data);
+    }else{
+        cb(UnReadMessages(),OnGetMessagesError::ConnectionErrors);
+    }
+}
+
+void MagabeClientApp::getUnReadMessages(const Conversation &conversation
+                                        , GetUnReadMessagesCallback cb
+                                        , int maxNoOfMessages, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    if(!cb){
+        return;
+    }
+
+    auto data = constructGetMessageRequest((int)GetMessagesMethodType::GetUnReadMessages,conversation,maxNoOfMessages,sortOrder);
+    const auto tag = getGetMessageRequestTag(data);
+
+    if(isConnected()){
+        abstractGetMessagesCallbacks_->registerCallback(tag,(void*)cb,GetMessagesMethodType::GetUnReadMessages);
+        sendRequest(data);
+    }else{
+        cb(UnReadMessages(),OnGetMessagesError::ConnectionErrors);
+    }
+}
+
+void MagabeClientApp::sendMessage(const QString &receiverUserName, const QString &messageText, MagabeClientApp::SendMessageCallback cb)
+{
+    if(!cb){
+        return;
+    }
+
+    if(receiverUserName.isEmpty()){
+        cb(receiverUserName,Message(),OnSendMessageError::UserDoesNotExist);
+        return;
+    }
+
+    if(isConnected()){
+        QString tag;
+createTag:
+        tag = QString("%1:%2:%3:%4").arg(receiverUserName)
+                .arg(QDateTime::currentMSecsSinceEpoch()).arg(((unsigned long long)cb))
+                .arg(messageText.length());
+        if(sendMessageCallbacks_->containsTag(tag)){
+            goto createTag;
+        }
+
+        MagabeData data;
+        data.setController("ConversationController")
+                .setAction("ActionSendMessage")
+                .addExtras("receiver",receiverUserName)
+                .addExtras("messageText",messageText)
+                .addExtras("sendMessageRequestTag",tag);
+
+        sendMessageCallbacks_->registerCallback(tag,receiverUserName,cb);
+
+        sendRequest(data);
+    }else{
+        cb(receiverUserName,Message(),OnSendMessageError::ConnectionErrors);
+    }
+
+}
+
+void MagabeClientApp::sendMessage(unsigned long receiverUserId, const QString &messageText, MagabeClientApp::SendMessageCallback cb)
+{
+
+    QList<unsigned long> userIds;
+    userIds << receiverUserId;
+    fetchUserNames(userIds,[=](QMap<unsigned long,QString> map){
+        //    auto username = map.value(receiverUserId);
+        auto keys = map.keys();
+        if(keys.length() > 0){
+            auto username  = map.value(keys.at(0));
+            qDebug() << username;
+            if(!username.isEmpty()){
+                //sendMessage(username,messageText,cb);
+            }else{
+                // cb("",Message(),OnSendMessageError::UserDoesNotExist);
+            }
+        }
+    });
+
+}
+
+void MagabeClientApp::fetchUserNames(QList<unsigned long> userIds, MagabeClientApp::FetchUserNamesCallback cb)
+{
+
+    if(!cb){
+        return;
+    }
+
+    QMap<unsigned long,QString> map;
+
+    if(userIds.isEmpty()){
+        cb(map);
+        return;
+    }
+
+    QStringList ids;
+    QString subTag("[");
+    int i=0;
+    foreach (auto id, userIds) {
+        const auto strId = QString::number(id);
+        ids << strId;
+        if((i > 0) && (i < ids.length())){
+            subTag.append(',') ;
+        }
+        subTag.append(strId);
+        i++;
+    }
+    subTag.append(']');
+
+    if(isConnected()){
+        QString tag;
+createTag:
+        tag = QString("%1:%2:%3:%4").arg(subTag)
+                .arg(QDateTime::currentMSecsSinceEpoch()).arg(((unsigned long long)cb))
+                .arg(ids.length());
+        if(fetchUserNamesCallbacks_->containsTag(tag)){
+            goto createTag;
+        }
+
+        MagabeData data;
+        data.setController("UserController")
+                .setAction("ActionFetchUserNames")
+                .addExtras("userIds",ids)
+                .addExtras("fetchUserNamesRequestTag",tag);
+
+        fetchUserNamesCallbacks_->registerCallback(tag,cb);
+
+        sendRequest(data);
+    }else{
+        cb(map);
+    }
+
+}
+
+void MagabeClientApp::uploadProfilePicture(const QString &imagePath){
+
+    auto path = FileUtils::generateFilePath(AuthenticationController::getProfilePicturesFolder(),FileUtils::getFileName(imagePath));
+    const bool copyed =  FileUtils::copyFile(imagePath,path);
+    if(!copyed){
+        path = imagePath;
+    }
+
+    Extras extras;
+    extras.addExtras("imagePath",path);
+    triggerControllerAction(TO_CSTR(AuthenticationController),"ActionStartProfilePictureUploading",extras);
+}
+
+void MagabeClientApp::uploadScaledProfilePicture(const QString &imagePath
+                                                 , int quality, int width, int height
+                                                 , Qt::AspectRatioMode aspectMode){
+    bool saved = false;
+    auto path  = FileUtils::scaleImageAndSaveToFolder(imagePath,AuthenticationController::getProfilePicturesFolder(),FileUtils::getFileName(imagePath)
+                                                      ,quality,width,height,aspectMode,&saved);
+    if(!saved){
+        path = imagePath;
+    }
+
+    Extras extras;
+    extras.addExtras("imagePath",path);
+    triggerControllerAction(TO_CSTR(AuthenticationController),"ActionStartProfilePictureUploading",extras);
+}
+
+bool MagabeClientApp::isConnected()
+{
+    auto cRef = CONTROLLER_IDENTIFIER_REF;
+    return cRef->isSocketConnected();
+}
+
+void MagabeClientApp::connectToServer(const QString &ipAdress, int port, int msecsTimeout)
+{
+    emit magabeClientManager_.connectToServer(ipAdress,QString::number(port),msecsTimeout);
+}
+
+void MagabeClientApp::disconnectFromServer()
+{
+    emit magabeClientManager_.disconnectFromServer();
+}
+
+void MagabeClientApp::getUserInfo(const QString& username,GetUserInfoCallback cb)
+{
+    UserInfo info;
+    info.setUsername(username);
+    if((!username.isEmpty()) && cb){
+        if(isConnected()){
+            userInfoCallbacks_->registerCallback(username,cb);
+            MagabeData data;
+            data.setController("UserController")
+                    .setAction("ActionGetUserInfo")
+                    .addExtras("username",username);
+            sendRequest(data);
+        }else{
+            cb(username,info,UserInfoError::ConnectionErrors);
+        }
+    }
+
+    if((!isConnected()) && cb){
+        cb(username,info,UserInfoError::ConnectionErrors);
+        return;
+    }
+}
+
+void MagabeClientApp::downloadProfilePicture(const QString& username,DownloadProfilePictureCallback cb){
+    if((!username.isEmpty()) && cb){
+        if(isConnected()){
+            profilePictureDownloadCallbacks_->registerCallback(username,cb);
+            Extras extras;
+            extras.addExtras("username",username);
+            triggerControllerAction(TO_CSTR(AuthenticationController),"ActionStartProfilePictureDownloading",extras);
+        }else{
+            cb(username,"",ProfilePictureDownloadError::ConnectionErrors);
+        }
+    }
+
+    if((!isConnected()) && cb){
+        cb(username,"",ProfilePictureDownloadError::ConnectionErrors);
+        return;
+    }
+}
+
+bool MagabeClientApp::sendRequest(MagabeData &data)
+{
+    if(!isConnected()){
+        qWarning() << "MagabeClientApp::sendRequest |   Error , Failed to send, Not connected ..!";
+        return false;
+    }
+    bool invocked =  QMetaObject::invokeMethod(DWritter::instance()
+                                               ,"sendData"
+                                               ,Q_ARG(QString,data.toByteArray()));
+    if(!invocked){
+        qWarning() << "Authentication::sendRequest :: Critical Error , Invocation Failed" ;
+    }
+    return invocked;
+}
+
+bool MagabeClientApp::triggerControllerAction(const QString &controller
+                                              , const QString &action, Extras& extras)
+{
+
+    ControllerIdentifier *controllerIdentifier =  CONTROLLER_IDENTIFIER_REF;
+    if(controllerIdentifier){
+        if(controllerIdentifier->isActionRegistered(controller,action)){
+            MagabeData data(extras.toByteArray());
+            data.setController(controller).setAction(action);
+            QString bytesArray  =  Security::instance()->encryptToString(data.toByteArray());//only encrypt to string, ecryption to bytearray cause los of data
+            return QMetaObject::invokeMethod(controllerIdentifier
+                                             ,"onDataReceivedFromDataProcessor"
+                                             ,Q_ARG(QByteArray,bytesArray.toLatin1()));
+        }else{
+            return false;
+        }
+    }else{
+        return false;
+    }
+}
+
+void MagabeClientApp::onUserInfo(QString json)
+{
+    // qDebug() << " MagabeClientApp::onUserInfo" << json;
+    auto info = UserInfo::fromJson(json);
+    userInfoCallbacks_->invokeCallback(info.username(),info,UserInfoError::NoError);
+}
+
+void MagabeClientApp::onUserNotFound(QString username)
+{
+    //qDebug() << " MagabeClientApp::onUserNotFound" << username;
+    UserInfo info;
+    info.setUsername(username);
+    userInfoCallbacks_->invokeCallback(username,info,UserInfoError::UserNotFound);
+}
+
+void MagabeClientApp::onConnected()
+{
+    //qDebug() << "MagabeClientApp::onConnected:";
+    emit connectedChanged();
+}
+
+void MagabeClientApp::onDisconnected()
+{
+    //qDebug() << "MagabeClientApp::onDisconnected";
+
+    emit connectedChanged();
+
+    removeAllCallbacks();
+
+    setAuthenticated(false);
+}
+
+void MagabeClientApp::removeAllCallbacks(){
+    userInfoCallbacks_->removeAllCallbacks();
+    profilePictureDownloadCallbacks_->removeAllCallbacks();
+    abstractGetMessagesCallbacks_->removeAllCallbacks();
+    sendMessageCallbacks_->removeAllCallbacks();
+    fetchUserNamesCallbacks_->removeAllCallbacks();
+
+}
+
+void MagabeClientApp::onUserProfilePictureDownloadFinished(QString username, QString imagePath)
+{
+    //qDebug() << "MagabeClientApp::onUserProfilePictureDownloadFinished" <<username << imagePath;
+    profilePictureDownloadCallbacks_->invokeCallback(username,imagePath,ProfilePictureDownloadError::NoError);
+}
+
+void MagabeClientApp::onProfilePictureDownloadFailed(QString username,int profilePictureDownloadError)
+{
+    //qDebug() << "MagabeClientApp::onProfilePictureDownloadFailed"<<username <<profilePictureDownloadError;
+    profilePictureDownloadCallbacks_->invokeCallback(username,"",(ProfilePictureDownloadError)profilePictureDownloadError);
+}
+
+void MagabeClientApp::onSignUpSucceeded(unsigned long id, QString username)
+{
+    Q_UNUSED(id)
+    Q_UNUSED(username)
+    //  qDebug() << "MagabeClientApp::onSignUpSucceeded | userId == " << id << ", username == "<< username;
+    setAuthenticated(true);
+}
+
+void MagabeClientApp::onSignUpFailed(int signUpError, QString errorString)
+{
+    Q_UNUSED(signUpError)
+    Q_UNUSED(errorString)
+
+    setAuthenticated(false);
+
+    // qDebug() << "MagabeClientApp::onSignUpFailed | signUpError == " << signUpError << ", errorString == " << errorString;
+}
+
+void MagabeClientApp::onAuthenticationSucceded(unsigned long id, QString username)
+{
+    Q_UNUSED(id)
+    Q_UNUSED(username)
+
+    setAuthenticated(true);
+
+    /* -------------TEST------------------*/
+    //qDebug() << "MagabeClientApp::onAuthenticationSucceded | userId == " << id << ", username == "<< username;
+
+
+    //        getUserInfo("chura123",[](const QString& username,const UserInfo& info,const UserInfoError& error){
+    //            if(error == UserInfoError::NoError){
+    //                qDebug()<< "id" << info.id();
+    //                qDebug()<< "username" << info.username();
+    //                qDebug()<< "firstName" << info.firstName();
+    //                qDebug()<< "lastName" << info.lastName();
+    //                qDebug()<< "profilePicture" << info.profilePicture();
+    //                qDebug()<< "phoneNumber" << info.phoneNumber();
+    //                qDebug()<< "dateOfBirth" << info.dateOfBirth();
+    //                qDebug()<< "location" << info.location();
+
+    //            }else{
+    //                qDebug() << info.username() <<"user > not found!";
+    //            }
+    //        });
+    //    downloadProfilePicture("chura123",[](const QString& username,const QString& profilePicturePath,const MagabeClientApp::ProfilePictureDownloadError error){
+
+    //        if(error == MagabeClientApp::ProfilePictureDownloadError::NoError){
+    //            qDebug() <<"downloaded " <<username << "---" << profilePicturePath;
+    //        }else{
+    //            qDebug() <<"error ocuured while downloading profile picture for  " << username;
+    //        }
+    //    });
+
+    // uploadProfilePicture("C:/Users/Edwin Magabe/Pictures/1551669_746924982046204_7242180675798117757_n.jpg");
+    // uploadProfilePicture("C:/Users/Edwin Magabe/Pictures/621104_574459175959453_1129020515_o.jpg");
+
+    /*---------------------------------------------------*/
+    //    auto count = [=](){
+    //        return  abstractGetMessagesCallbacks_->count();
+    //    };
+
+    //    Message msg;
+    //    msg.messageIdentifier_ = "1:2:14";
+    //    GetSentMessagesCallback cb =[=](SentMessages sentMessages,OnGetMessagesError error){
+    //        if(error == OnGetMessagesError::NoError){
+    //            qDebug() <<"SentMessages -> "<< sentMessages;
+    //        }else{
+    //            qDebug()  << error;
+    //        }
+
+    //    };
+
+    //    getSentMessages(msg,cb,20,true);
+    //    qDebug() <<"caunt -> " << count();
+
+
+    //    /*-------------------------------------------*/
+
+    //    GetReceivedMessagesCallback getReceivedMessagesCallback =[=](ReceivedMessages receivedMessages,OnGetMessagesError error){
+    //        if(error == OnGetMessagesError::NoError){
+    //            qDebug() <<"ReceivedMessages -> "<< receivedMessages;
+    //        }else{
+    //            qDebug()  << error;
+    //        }
+
+    //    };
+
+    //    getReceivedMessages(msg,getReceivedMessagesCallback,7,true);
+    //    qDebug() <<"caunt -> " << count();
+    //    /*-------------------------------------------*/
+
+    //    GetMessagesCallback getMessagesCallback = [=](Messages messages,OnGetMessagesError error){
+    //        if(error == OnGetMessagesError::NoError){
+    //            qDebug() <<"All Messages -> "<< messages;
+    //        }else{
+    //            qDebug()  << error;
+
+    //        }
+
+    //    };
+    //    //qDebug()<< "--------";
+    //    getMessages(Conversation("1:2"),getMessagesCallback,20,MessagesSortOrder::DESC);
+    //    qDebug() <<"caunt -> " << count();
+    //    /*-------------------------------------------*/
+    //    GetUnReadMessagesCallback getUnReadMessagesCallback = [=](UnReadMessages messages,OnGetMessagesError error){
+    //        if(error == OnGetMessagesError::NoError){
+    //            qDebug() <<"UnReadMessages -> "<< messages;
+    //        }else{
+    //            qDebug()  << error;
+
+    //        }
+
+    //    };
+    //    //qDebug()<< "--------";
+    //    getUnReadMessages(Conversation("1:2"),getUnReadMessagesCallback ,20,MessagesSortOrder::DESC);
+    //    qDebug() <<"caunt -> " << count();
+    //    /*-------------------------------------------*/
+    //    GetReadMessagesCallback getReadMessagesCallback = [=](ReadMessages messages,OnGetMessagesError error){
+    //        if(error == OnGetMessagesError::NoError){
+    //            qDebug() <<"ReadMessages -> "<< messages;
+    //        }else{
+    //            qDebug()  << error;
+
+    //        }
+
+    //    };
+    //    //qDebug()<< "--------";
+    //    getReadMessages(Conversation("1:2"),getReadMessagesCallback ,20,MessagesSortOrder::DESC);
+    //    qDebug() <<"caunt -> " << count();
+    //    /*-------------------------------------------*/
+
+    //    SendMessageCallback sendMessageCallback = [=](const QString &receiver,Message sent,OnSendMessageError error){
+    //        if(error == OnSendMessageError::NoError){
+    //            qDebug() << "Message sent to -> "<< receiver;
+    //            qDebug() << " message ->  "      << sent.text();
+    //            qDebug() << sent;
+    //        }else{
+    //            qDebug() << "message not sent | error => " << error;
+
+    //        }
+    //    };
+
+    //    sendMessage("chura123","getReadMessages(Conversation(\"1:2\"),getReadMessagesCallback ",sendMessageCallback);
+
+//    /*---------------------------*/
+//    QList<unsigned long> userIds;
+//    userIds << 1 <<2 << 3 << 4;
+//    fetchUserNames(userIds,[=](QMap<unsigned long,QString> map){
+//        qDebug() << map;
+//    });
+
+//    /*-----------------------------------*/
+
+    sendMessage(1,"sent to user id 1 ", [=](const QString &receiver,Message sent,OnSendMessageError error){
+        if(error == OnSendMessageError::NoError){
+            qDebug() << "Message sent to -> "<< receiver;
+            qDebug() << " message ->  "      << sent.text();
+            qDebug() << sent;
+        }else{
+            qDebug() << "message not sent | error => " << error;
+
+        }
+    });
+
+}
+
+void MagabeClientApp::onAuthenticationFailed(int authenticationError)
+{
+    Q_UNUSED(authenticationError)
+
+    setAuthenticated(false);
+
+    // qDebug() << "MagabeClientApp::onAuthenticationFailed | authenticationErro == " << authenticationError;
+
+}
+
+void MagabeClientApp::onLoginSucceeded(unsigned long id, QString username)
+{
+    Q_UNUSED(id)
+    Q_UNUSED(username)
+
+    setAuthenticated(true);
+
+    // qDebug() << "MagabeClientApp::loginSucceeded | userId == " << id << ", username == "<< username;
+}
+
+void MagabeClientApp::onLoginFailed(int authenticationError)
+{
+    Q_UNUSED(authenticationError)
+
+    setAuthenticated(false);
+
+    // qDebug() << "MagabeClientApp::onLoginFailed== " << authenticationErrorToString((AuthenticationError)authenticationError);
+}
+
+void MagabeClientApp::onLogOutSucceeded()
+{
+    setAuthenticated(false);
+
+    removeAllCallbacks();
+    //qDebug() << " MagabeClientApp::onLogOutSucceeded";
+}
+
+void MagabeClientApp::onConnectTimeout()
+{
+    setAuthenticated(false);
+
+    // qDebug() << "MagabeClientApp::onConnectTimeout";
+}
+
+void MagabeClientApp::onMessagesReceived(QString jsonMessages, QString tag)
+{
+    abstractGetMessagesCallbacks_->invokeCallback(tag,jsonMessages);
+}
+
+void MagabeClientApp::onGetMessageError(int onGetMessageError, QString tag)
+{
+    abstractGetMessagesCallbacks_->invokeCallback(tag,"",(OnGetMessagesError)onGetMessageError);
+}
+
+void MagabeClientApp::onMessageSent(QString jsonMessage, QString tag)
+{
+    sendMessageCallbacks_->invokeCallback(tag,jsonMessage,OnSendMessageError::NoError);
+}
+
+void MagabeClientApp::onMessageNotSent(int onSendMessageError, QString tag)
+{
+    sendMessageCallbacks_->invokeCallback(tag,"",(OnSendMessageError)onSendMessageError);
+}
+
+void MagabeClientApp::onUserNamesReceived(QString jsonUserNames, QString tag)
+{
+    fetchUserNamesCallbacks_->invokeCallback(tag,jsonUserNames);
+}
+
+void MagabeClientApp::setAuthenticated(bool authenticated)
+{
+    if(authenticated_ != authenticated){
+        authenticated_ = authenticated;
+        emit authenticatedChanged(authenticated_);
+    }
+}
+
+MagabeData MagabeClientApp::constructGetMessageRequest(int methodType, const Message &start, int maxNoOfMessages
+                                                       , bool includeStartMessage, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    const QString strOrder = (sortOrder == MagabeClientApp::MessagesSortOrder::ASC ? "ASC" : "DESC");
+    const auto messageIdentifier = start.messageIdentifier();
+    MagabeData data;
+    QString tag;
+createTag:
+    tag = QString("%1:%2:%3:%4:%5:%6")
+            .arg(QString("%1[%2]").arg(toGetMessagesMethodTypeHuman(methodType)).arg(methodType))
+            .arg( messageIdentifier).arg(maxNoOfMessages)
+            .arg(includeStartMessage).arg(strOrder)
+            .arg(QDateTime::currentMSecsSinceEpoch());
+
+    if(abstractGetMessagesCallbacks_->containsTag(tag)){
+        goto  createTag;
+    }
+
+    data.setController("ConversationController")
+            .setAction("ActionGetMessages")
+            .addExtras("getMessagesMethodType",methodType)
+            .addExtras("messageIdentifier", messageIdentifier)
+            .addExtras("maxNoOfMessages",maxNoOfMessages)
+            .addExtras("includeStartMessage",includeStartMessage)
+            .addExtras("sortOrder",strOrder)
+            .addExtras("getMessageRequestTag",tag);
+
+    return data;
+}
+
+MagabeData MagabeClientApp::constructGetMessageRequest(int methodType, const Conversation &conversation
+                                                       , int maxNoOfMessages, const MagabeClientApp::MessagesSortOrder sortOrder)
+{
+    const QString strOrder = (sortOrder == MagabeClientApp::MessagesSortOrder::ASC ? "ASC" : "DESC");
+    const auto conversationIdentifier = const_cast<Conversation &>(conversation).conversationIdentifier();
+    MagabeData data;
+    QString tag;
+createTag:
+    tag = QString("%1:%2:%3:%4:%5:%6")
+            .arg(QString("%1[%2]").arg(toGetMessagesMethodTypeHuman(methodType)).arg(methodType))
+            .arg(conversationIdentifier).arg(maxNoOfMessages)
+            .arg(true).arg(strOrder)
+            .arg(QDateTime::currentMSecsSinceEpoch());
+
+    if(abstractGetMessagesCallbacks_->containsTag(tag)){
+        goto  createTag;
+    }
+
+    data.setController("ConversationController")
+            .setAction("ActionGetMessages")
+            .addExtras("getMessagesMethodType",methodType)
+            .addExtras("conversationIdentifier",conversationIdentifier)
+            .addExtras("maxNoOfMessages",maxNoOfMessages)
+            .addExtras("includeStartMessage",true)
+            .addExtras("sortOrder",strOrder)
+            .addExtras("getMessageRequestTag",tag);
+
+    return data;
+}
+
+QString MagabeClientApp::getGetMessageRequestTag(MagabeData &data)
+{
+    return data.getStringExtras("getMessageRequestTag");
+}
+
+
+QString MagabeClientApp::toGetMessagesMethodTypeHuman(int methodType){
+    switch ((GetMessagesMethodType)methodType) {
+    case GetMessagesMethodType::GetSentMessages: return "GetSentMessages";
+    case GetMessagesMethodType::GetReceivedMessages: return "GetReceivedMessages";
+    case GetMessagesMethodType::GetMessages: return "GetMessages";
+    case GetMessagesMethodType::GetReadMessages: return "GetReadMessages";
+    case GetMessagesMethodType::GetUnReadMessages: return "GetUnReadMessages";
+    default: return "";
+    }
+}
+
+
+
+
+
+
+/*--------------------------------TESTS-------------------------------------------*/
+#ifdef MAGABE_TESTS
+
+void MagabeClientApp::onLoginRequired(){
+    qDebug() << "MagabeClientApp::onLogin";
+    //    ///////ONLY FOR TESTS - signUp
+    //                        Authentication::signUp("qwertyeer","churaFirstName","lastname",
+    //                                               "12/14/2015",'M',"123456","magabe2123@yahoo.com");
+    //////////
+    ///////ONLY FOR TESTS - signUp
+    //login("chura123","123456");
+    //login("qwertyeer","123456");
+    //////
+}
+
+
+void MagabeClientApp::onLogOutFailed(int logOutError)
+{
+    qDebug() << "MagabeClientApp::onLogOutFailed" << logOutError;
+
+}
+
+void MagabeClientApp::onProfilePictureRequired()
+{
+    qDebug() << "MagabeClientApp::onProfilePictureRequired";
+}
+
+void MagabeClientApp::onProfilePictureUploaded(QString fileName, QString filePath)
+{
+    qDebug() << "MagabeClientApp::onProfilePictureUploaded | fileName ==" <<fileName<< ", filePath == " << filePath;
+}
+
+void MagabeClientApp::onProfilePictureUploadingFailed(QString fileName, QString filePath, QString errorString)
+{
+    qDebug() << "MagabeClientApp::onProfilePictureUploadingFailed | fileName ==" <<fileName<< ", filePath == " << filePath << ", errorString == " << errorString;
+
+}
+
+void MagabeClientApp::onProfilePictureUploadingNotFinished(QString fileName, QString filePath)
+{
+    qDebug() << "MagabeClientApp::onProfilePictureUploadingNotFinished | fileName ==" <<fileName<< ", filePath == " << filePath;
+
+}
+
+void MagabeClientApp::onProfilePictureChanged(QString imagePath)
+{
+    qDebug() << "MagabeClientApp::onProfilePictureChanged" << imagePath;
+}
+
+
+#endif
+
+/*--------------------------------TESTS-------------------------------------------*/

@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/CertificatesAndKey">
+        <file>churajasusi.crt_Encrypted</file>
+        <file>churajasusi.key_Encrypted</file>
+    </qresource>
+</RCC>

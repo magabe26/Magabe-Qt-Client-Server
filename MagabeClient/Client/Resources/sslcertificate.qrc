@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/sslcertificate">
+        <file>churajasusi.crt</file>
+    </qresource>
+</RCC>

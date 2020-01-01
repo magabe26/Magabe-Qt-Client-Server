@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file>MQmlCallbackCreator.qml</file>
+    </qresource>
+</RCC>

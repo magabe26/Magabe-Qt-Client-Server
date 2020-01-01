@@ -1,0 +1,869 @@
+import QtQuick 2.0
+import com.magabelab.magabeClient 1.0
+import com.magabelab.MQmlCallback 1.0
+
+
+
+
+Item {
+    id:root
+    
+    MQmlCallbackCreator{
+        id:callbackCreator
+        property real mQmlCallbackTimeOut : (60000*2);/*2min*/
+        property string done: '{\"done\":\"1\"}'
+        property string emptyData: '{}'
+    }
+    
+ 
+                    function userId(){
+                        return magabeClientApp.userId();
+                    }
+
+                    function userName(){
+                        return magabeClientApp.userName();
+                    }
+
+                    function authKey(){
+                        return magabeClientApp.authKey();
+                    }
+
+                    function password(){
+                        return magabeClientApp.password();
+                    }
+
+                    //return true if any error ocurred,param =>data is there to match the callbackks
+                    function error(dataError,mQmlCallbackError){
+                        return ((dataError !== 0)
+                                || (mQmlCallbackError !== 0))
+                    }
+
+                    function toMQmlCallback(cb){
+                       return callbackCreator.createMQmlCallback(cb,mQmlCallbackTimeOut);
+                    }
+
+                    /* if param is  userIdOrUsername ,Pass number for userId Or a string for username*/
+
+                    /* dataError = Errors::UserInfoError*/
+                    function getUserInfo(userIdOrUsername,cb){
+                        magabeClientApp.getUserInfo(userIdOrUsername,toMQmlCallback(cb));
+                    }
+
+                    /*dataError = Errors::ProfilePictureDownloadError*/
+                    function downloadProfilePicture(userIdOrUsername,cb){
+                        magabeClientApp.downloadProfilePicture(userIdOrUsername,toMQmlCallback(cb));
+                    }
+
+                    /* return dataError == 10 on error*/
+                    function getUserName(userId,cb){
+                        magabeClientApp.getUserName(userId,toMQmlCallback(cb));
+                    }
+
+                    /*dataError = Errors::OnSendMessageError*/
+                    function sendMessage(userIdOrUsername,message,cb){
+                        magabeClientApp.sendMessage(userIdOrUsername,message,toMQmlCallback(cb));
+                    }
+
+                    function decodeMessage(encodedMessage){
+                        return magabeClientApp.decodeMessage(encodedMessage);
+                    }
+
+                    /* Returns dataError == 10 on error*/
+                    function fetchUserNames(userIdList,cb){
+                        magabeClientApp.fetchUserNames(userIdList,toMQmlCallback(cb));
+                    }
+
+                    function generateMessageObject(messageIdentifier){
+                        return { messageIdentifier : messageIdentifier};
+                    }
+
+                    function generateConversationObject(conversationIdentifier){
+                        return { conversationIdentifier : conversationIdentifier};
+                    }
+
+                    function isValidConversationIdentifier(conversationIdentifier){
+                        return  magabeClientApp.isValidConversationIdentifier(conversationIdentifier);
+                    }
+
+                    function isValidMessageIdentifier(messageIdentifier){
+                        return  magabeClientApp.isValidMessageIdentifier(messageIdentifier);
+                    }
+
+                    /*    Returns null if messageIdentifier is not valid*/
+                    function generateConversationIdentifier(messageIdentifier){
+                        return magabeClientApp.generateConversationIdentifier(messageIdentifier);
+                    }
+
+                    
+
+                    function onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier){
+                        var message = JSON.parse(data);
+                        var messageIdentifier = message.messageIdentifier;
+
+                        if(messageIdentifier){
+
+                            if(cb[messageIdentifier]){//is a repeat
+                                return messageIdentifier;
+                            }
+
+                            cb[messageIdentifier] = true;
+
+                            if(endMessageIdentifier){
+                                var start = parseInt(String(messageIdentifier).split(':')[2]);
+                                var end = parseInt(String(endMessageIdentifier).split(':')[2]);
+                                if(start > end){//not in range
+                                    return messageIdentifier;
+                                }
+                            }
+                        }else{
+                            messageIdentifier = ""; //change from undefined
+                        }
+
+                        var obj = {
+                            done : 0,
+                            message : (message) ? message : emptyData
+                        };
+
+                        cb(JSON.stringify(obj),dataError,mQmlCallbackError);
+
+                        return messageIdentifier;
+                    }
+
+                    /*-------------------------------------------------------------------------------*/
+
+                    /*-----------------SENT MESSAGES------------------------------------*/
+                    /*-------------------------------------------------------------------------------*/
+                    function ___sentMessagefilter(data,dataError,mQmlCallbackError,cb){
+                        if(mQmlCallbackError !== MQmlCallback.NoError
+                                || (dataError !== 0)){
+                            cb(emptyData,dataError,mQmlCallbackError);
+                        }else{
+                            if(data){
+                                var obj = JSON.parse(data);
+                                if(obj){
+                                    var messagesObj = obj.Messages;
+                                    var keys = Object.keys(messagesObj);
+                                    if(keys.length == 1){
+                                        var sentMessage = messagesObj[keys[0]];
+                                        cb(JSON.stringify(sentMessage),0,0);
+                                    }else{
+                                        cb(emptyData,OnGetMessagesError.MessageNotFound,mQmlCallbackError);
+                                    }
+
+                                }else{
+                                    cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                                }
+                            }else{
+                                cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                            }
+                        }
+
+                    }
+
+                    function getSentMessage(messageIdentifier,cb){
+                        getSentMessagesStartWith(messageIdentifier,true,1,0,function(data,dataError,mQmlCallbackError){
+                            ___sentMessagefilter(data,dataError,mQmlCallbackError,cb);
+                        });
+                    }
+
+                    function getSentMessages(conversationIdentifier,maxNoOfMessages,sortOrder,cb){
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+                        magabeClientApp.getSentMessages(generateConversationObject(conversationIdentifier),maxNoOfMessages,sortOrder
+                                            ,toMQmlCallback(datafilter));
+                    }
+
+                    function getSentMessagesStartWith(messageIdentifier,includeStartMessage,maxNoOfMessages,sortOrder,cb){
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+                        magabeClientApp.getSentMessages(generateMessageObject(messageIdentifier),includeStartMessage,maxNoOfMessages,sortOrder
+                                            ,toMQmlCallback(datafilter));
+
+                    }
+
+                    function getNextSentMessage(messageIdentifier,cb){
+                        getSentMessagesStartWith(messageIdentifier,false,1,0,function(data,dataError,mQmlCallbackError){
+                            ___sentMessagefilter(data,dataError,mQmlCallbackError,cb);
+
+                        });
+                    }
+
+                    /*    Pass endMessageIdentifier == null , To loop through all the SentMessages
+                          Returns {done:1} object when done
+                    */
+                    streamGetSentMessages: function (startMessageIdentifier,endMessageIdentifier,cb){
+
+                        if((!magabeClientApp.isValidMessageIdentifier(startMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+                        if((endMessageIdentifier) && (!magabeClientApp.isValidMessageIdentifier(endMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+
+                        cb.callCount = 0;
+
+                        var shouldGetMore = function(messageIdentifier){
+                            if(endMessageIdentifier){
+                                var start = parseInt(String(messageIdentifier).split(':')[2]);
+                                var end = parseInt(String(endMessageIdentifier).split(':')[2]);
+                                if(start >= end){
+                                    return false;
+                                }else{
+                                    return true;
+                                }
+                            } else{
+                                return true;
+                            }
+                        };
+
+
+                        var getFirstMessage = function(messageIdentifier){
+                            getSentMessage(messageIdentifier,function(data,dataError,mQmlCallbackError){
+
+                                var nextMessageIdentifier;
+                                var errorOccurred = error(dataError,mQmlCallbackError);
+                                if(errorOccurred){
+                                    nextMessageIdentifier =  messageIdentifier;
+                                }else{
+                                    nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(nextMessageIdentifier){
+                                        nextMessageIdentifier =  messageIdentifier;
+                                    }
+                                }
+
+                                if(shouldGetMore(nextMessageIdentifier)){
+                                    getNextMessage(nextMessageIdentifier);
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+
+                        var getNextMessage = function(startMessageIdentifier){
+                            getNextSentMessage(startMessageIdentifier,function(data,dataError,mQmlCallbackError){
+                                if(!error(dataError,mQmlCallbackError)){
+                                    var  nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(shouldGetMore(nextMessageIdentifier)){
+                                        getNextMessage(nextMessageIdentifier);
+                                    }else{
+                                        cb(done,dataError,mQmlCallbackError)
+                                    }
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+                        getFirstMessage(startMessageIdentifier);
+
+                    }
+
+                    /*-------------------------------------------------------------------------------*/
+
+                    /*--------------------RECEIVED MESSAGES--------------------------------------*/
+                    /*-------------------------------------------------------------------------------*/
+
+                    ___receivedMessageFilter: function(data,dataError,mQmlCallbackError,cb){
+                        if(mQmlCallbackError !== MQmlCallback.NoError
+                                || (dataError !== 0)){
+                            cb(emptyData,dataError,mQmlCallbackError);
+                        }else{
+                            if(data){
+                                var obj = JSON.parse(data);
+                                if(obj){
+                                    var messagesObj = obj.Messages;
+                                    var keys = Object.keys(messagesObj);
+                                    if(keys.length == 1){
+                                        var receivedMessage = messagesObj[keys[0]];
+                                        cb(JSON.stringify(receivedMessage),0,0);
+                                    }else{
+                                        cb(emptyData,OnGetMessagesError.MessageNotFound,mQmlCallbackError);
+                                    }
+
+                                }else{
+                                    cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                                }
+                            }else{
+                                cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                            }
+                        }
+
+                    }
+
+                    getReceivedMessage:function (messageIdentifier,cb){
+                        getReceivedMessagesStartWith(messageIdentifier,true,1,0,function(data,dataError,mQmlCallbackError){
+                            ___receivedMessageFilter(data,dataError,mQmlCallbackError,cb);
+                        });
+                    }
+
+                    getReceivedMessages: function(conversationIdentifier,maxNoOfMessages,sortOrder,cb){
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+                        magabeClientApp.getReceivedMessages(generateConversationObject(conversationIdentifier),maxNoOfMessages,sortOrder
+                                                ,toMQmlCallback(datafilter));
+                    }
+
+                    getReceivedMessagesStartWith: function (messageIdentifier,includeStartMessage,maxNoOfMessages,sortOrder,cb){
+
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+
+                        magabeClientApp.getReceivedMessages(generateMessageObject(messageIdentifier),includeStartMessage,maxNoOfMessages,sortOrder
+                                                ,toMQmlCallback(datafilter));
+
+                    }
+
+                    getNextReceivedMessage: function (messageIdentifier,cb){
+                        getReceivedMessagesStartWith(messageIdentifier,false,1,0,function(data,dataError,mQmlCallbackError){
+                            ___receivedMessageFilter(data,dataError,mQmlCallbackError,cb);
+                        });
+                    }
+
+                    /*    Pass endMessageIdentifier == null , To loop through all the ReceivedMessages
+                          Returns {done:1} object when done
+                    */
+                    streamReceivedMessages: function (startMessageIdentifier,endMessageIdentifier,cb){
+                        if((!magabeClientApp.isValidMessageIdentifier(startMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+                        if((endMessageIdentifier) && (!magabeClientApp.isValidMessageIdentifier(endMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+
+                        cb.callCount = 0;
+
+                        var shouldGetMore = function(messageIdentifier){
+                            if(endMessageIdentifier){
+                                var start = parseInt(String(messageIdentifier).split(':')[2]);
+                                var end = parseInt(String(endMessageIdentifier).split(':')[2]);
+                                if(start >= end){
+                                    return false;
+                                }else{
+                                    return true;
+                                }
+                            } else{
+                                return true;
+                            }
+                        };
+
+                        var getFirstMessage = function(messageIdentifier){
+                            getReceivedMessage(messageIdentifier,function(data,dataError,mQmlCallbackError){
+
+                                var nextMessageIdentifier;
+                                var errorOccurred = error(dataError,mQmlCallbackError);
+                                if(errorOccurred){
+                                    nextMessageIdentifier =  messageIdentifier;
+                                }else{
+                                    nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(nextMessageIdentifier){
+                                        nextMessageIdentifier =  messageIdentifier;
+                                    }
+                                }
+
+                                if(shouldGetMore(nextMessageIdentifier)){
+                                    getNextMessage(nextMessageIdentifier);
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+
+                        var getNextMessage = function(startMessageIdentifier){
+                            getNextReceivedMessage(startMessageIdentifier,function(data,dataError,mQmlCallbackError){
+                                if(!error(dataError,mQmlCallbackError)){
+                                    var  nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(shouldGetMore(nextMessageIdentifier)){
+                                        getNextMessage(nextMessageIdentifier);
+                                    }else{
+                                        cb(done,dataError,mQmlCallbackError)
+                                    }
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+                        getFirstMessage(startMessageIdentifier);
+
+                    }
+
+                    /*-------------------------------------------------------------------------------*/
+
+                    /*--------------------BOTH SENT && RECEIVED MESSAGES--------------------------------------*/
+                    /*-------------------------------------------------------------------------------*/
+
+
+
+                    ___messageFilter: function(data,dataError,mQmlCallbackError,cb){
+                        if(mQmlCallbackError !== MQmlCallback.NoError
+                                || (dataError !== 0)){
+                            cb(emptyData,dataError,mQmlCallbackError);
+                        }else{
+                            if(data){
+                                var obj = JSON.parse(data);
+                                if(obj){
+                                    var messagesObj = obj.Messages;
+                                    var keys = Object.keys(messagesObj);
+                                    if(keys.length == 1){
+                                        var message = messagesObj[keys[0]];
+                                        cb(JSON.stringify(message),0,0);
+                                    }else{
+                                        cb(emptyData,OnGetMessagesError.MessageNotFound,mQmlCallbackError);
+                                    }
+
+                                }else{
+                                    cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                                }
+                            }else{
+                                cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                            }
+                        }
+
+                    }
+
+                    getMessage: function (messageIdentifier,cb){
+                        getMessagesStartWith(messageIdentifier,true,1,0,function(data,dataError,mQmlCallbackError){
+                            ___messageFilter(data,dataError,mQmlCallbackError,cb);
+                        });
+                    }
+
+                    getMessages: function(conversationIdentifier,maxNoOfMessages,sortOrder,cb){
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+                        magabeClientApp.getMessages(generateConversationObject(conversationIdentifier),maxNoOfMessages,sortOrder
+                                        ,toMQmlCallback(datafilter));
+                    }
+
+                    getMessagesStartWith: function (messageIdentifier,includeStartMessage,maxNoOfMessages,sortOrder,cb){
+
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+
+                        magabeClientApp.getMessages(generateMessageObject(messageIdentifier),includeStartMessage,maxNoOfMessages,sortOrder
+                                        ,toMQmlCallback(datafilter));
+
+                    }
+
+                    getNextMessage: function (messageIdentifier,cb){
+                        getMessagesStartWith(messageIdentifier,false,1,0,function(data,dataError,mQmlCallbackError){
+                            ___messageFilter(data,dataError,mQmlCallbackError,cb);
+                        });
+                    }
+
+                    streamMessages: function (startMessageIdentifier,endMessageIdentifier,cb){
+                        if((!magabeClientApp.isValidMessageIdentifier(startMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+                        if((endMessageIdentifier) && (!magabeClientApp.isValidMessageIdentifier(endMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+
+                        cb.callCount = 0;
+
+                        var shouldGetMore = function(messageIdentifier){
+                            if(endMessageIdentifier){
+                                var start = parseInt(String(messageIdentifier).split(':')[2]);
+                                var end = parseInt(String(endMessageIdentifier).split(':')[2]);
+                                if(start >= end){
+                                    return false;
+                                }else{
+                                    return true;
+                                }
+                            } else{
+                                return true;
+                            }
+                        };
+
+                        var getFirstMessage = function(messageIdentifier){
+                            getMessage(messageIdentifier,function(data,dataError,mQmlCallbackError){
+
+                                var nextMessageIdentifier;
+                                var errorOccurred = error(dataError,mQmlCallbackError);
+                                if(errorOccurred){
+                                    nextMessageIdentifier =  messageIdentifier;
+                                }else{
+                                    nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(nextMessageIdentifier){
+                                        nextMessageIdentifier =  messageIdentifier;
+                                    }
+                                }
+
+                                if(shouldGetMore(nextMessageIdentifier)){
+                                    getNextMessage(nextMessageIdentifier);
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+
+                        var getNextMessage = function(startMessageIdentifier){
+                            getNextMessage(startMessageIdentifier,function(data,dataError,mQmlCallbackError){
+                                if(!error(dataError,mQmlCallbackError)){
+                                    var  nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(shouldGetMore(nextMessageIdentifier)){
+                                        getNextMessage(nextMessageIdentifier);
+                                    }else{
+                                        cb(done,dataError,mQmlCallbackError)
+                                    }
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+                        getFirstMessage(startMessageIdentifier);
+
+                    }
+
+                    /*--------------------READ MESSAGES--------------------------------------*/
+                    /*-------------------------------------------------------------------------------*/
+
+                    ___readMessageFilter: function(data,dataError,mQmlCallbackError,cb){
+                        if(mQmlCallbackError !== MQmlCallback.NoError
+                                || (dataError !== 0)){
+                            cb(emptyData,dataError,mQmlCallbackError);
+                        }else{
+                            if(data){
+                                var obj = JSON.parse(data);
+                                if(obj){
+                                    var messagesObj = obj.Messages;
+                                    var keys = Object.keys(messagesObj);
+                                    if(keys.length == 1){
+                                        var receivedMessage = messagesObj[keys[0]];
+                                        cb(JSON.stringify(receivedMessage),0,0);
+                                    }else{
+                                        cb(emptyData,OnGetMessagesError.MessageNotFound,mQmlCallbackError);
+                                    }
+
+                                }else{
+                                    cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                                }
+                            }else{
+                                cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                            }
+                        }
+
+                    }
+
+                    getReadMessage:function (messageIdentifier,cb){
+                        getReadMessagesStartWith(messageIdentifier,true,1,0,function(data,dataError,mQmlCallbackError){
+                            ___readMessageFilter(data,dataError,mQmlCallbackError,cb);
+                        });
+                    }
+
+                    getReadMessages: function(conversationIdentifier,maxNoOfMessages,sortOrder,cb){
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+                        magabeClientApp.getReadMessages(generateConversationObject(conversationIdentifier),maxNoOfMessages,sortOrder
+                                            ,toMQmlCallback(datafilter));
+                    }
+
+                    getReadMessagesStartWith: function (messageIdentifier,includeStartMessage,maxNoOfMessages,sortOrder,cb){
+
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+
+                        magabeClientApp.getReadMessages(generateMessageObject(messageIdentifier),includeStartMessage,maxNoOfMessages,sortOrder
+                                            ,toMQmlCallback(datafilter));
+
+                    }
+
+                    getNextReadMessage: function (messageIdentifier,cb){
+                        getReadMessagesStartWith(messageIdentifier,false,1,0,function(data,dataError,mQmlCallbackError){
+                            ___readMessageFilter(data,dataError,mQmlCallbackError,cb);
+                        });
+                    }
+
+                    /*    Pass endMessageIdentifier == null , To loop through all the ReceivedMessages
+                          Returns {done:1} object when done
+                    */
+                    streamReadMessages: function (startMessageIdentifier,endMessageIdentifier,cb){
+                        if((!magabeClientApp.isValidMessageIdentifier(startMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+                        if((endMessageIdentifier) && (!magabeClientApp.isValidMessageIdentifier(endMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+
+                        cb.callCount = 0;
+
+                        var shouldGetMore = function(messageIdentifier){
+                            if(endMessageIdentifier){
+                                var start = parseInt(String(messageIdentifier).split(':')[2]);
+                                var end = parseInt(String(endMessageIdentifier).split(':')[2]);
+                                if(start >= end){
+                                    return false;
+                                }else{
+                                    return true;
+                                }
+                            } else{
+                                return true;
+                            }
+                        };
+
+
+                        var getFirstMessage = function(messageIdentifier){
+                            getReadMessage(messageIdentifier,function(data,dataError,mQmlCallbackError){
+
+                                var nextMessageIdentifier;
+                                var errorOccurred = error(dataError,mQmlCallbackError);
+                                if(errorOccurred){
+                                    nextMessageIdentifier =  messageIdentifier;
+                                }else{
+                                    nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(nextMessageIdentifier){
+                                        nextMessageIdentifier =  messageIdentifier;
+                                    }
+                                }
+
+                                if(shouldGetMore(nextMessageIdentifier)){
+                                    getNextMessage(nextMessageIdentifier);
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+
+                        var getNextMessage = function(startMessageIdentifier){
+                            getNextReadMessage(startMessageIdentifier,function(data,dataError,mQmlCallbackError){
+                                if(!error(dataError,mQmlCallbackError)){
+                                    var  nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(shouldGetMore(nextMessageIdentifier)){
+                                        getNextMessage(nextMessageIdentifier);
+                                    }else{
+                                        cb(done,dataError,mQmlCallbackError)
+                                    }
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+                        getFirstMessage(startMessageIdentifier);
+
+                    }
+
+                    /*--------------------UNREAD MESSAGES--------------------------------------*/
+                    /*-------------------------------------------------------------------------------*/
+
+                    ___unReadMessageFilter: function(data,dataError,mQmlCallbackError,cb){
+                        if(mQmlCallbackError !== MQmlCallback.NoError
+                                || (dataError !== 0)){
+                            cb(emptyData,dataError,mQmlCallbackError);
+                        }else{
+                            if(data){
+                                var obj = JSON.parse(data);
+                                if(obj){
+                                    var messagesObj = obj.Messages;
+                                    var keys = Object.keys(messagesObj);
+                                    if(keys.length == 1){
+                                        var receivedMessage = messagesObj[keys[0]];
+                                        cb(JSON.stringify(receivedMessage),0,0);
+                                    }else{
+                                        cb(emptyData,OnGetMessagesError.MessageNotFound,mQmlCallbackError);
+                                    }
+
+                                }else{
+                                    cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                                }
+                            }else{
+                                cb(emptyData,OnGetMessagesError.UnknownError,mQmlCallbackError);
+                            }
+                        }
+
+                    }
+
+                    getUnReadMessage: function (messageIdentifier,cb){
+                        getUnReadMessagesStartWith(messageIdentifier,true,1,0,function(data,dataError,mQmlCallbackError){
+                            ___unReadMessageFilter(data,dataError,mQmlCallbackError,cb);
+                        });
+                    }
+
+                    getUnReadMessages: function(conversationIdentifier,maxNoOfMessages,sortOrder,cb){
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+                        magabeClientApp.getUnReadMessages(generateConversationObject(conversationIdentifier),maxNoOfMessages,sortOrder
+                                              ,toMQmlCallback(datafilter));
+                    }
+
+                    getUnReadMessagesStartWith: function (messageIdentifier,includeStartMessage,maxNoOfMessages,sortOrder,cb){
+
+                        var datafilter = function(data,dataError,mQmlCallbackError){
+
+                            if(error(dataError,mQmlCallbackError)){
+                                cb(emptyData,dataError,mQmlCallbackError);
+                            }else{
+                                cb(data,dataError,mQmlCallbackError);
+                            }
+                        };
+
+                        magabeClientApp.getUnReadMessages(generateMessageObject(messageIdentifier),includeStartMessage,maxNoOfMessages,sortOrder
+                                              ,toMQmlCallback(datafilter));
+
+                    }
+
+                    getNextUnReadMessage: function (messageIdentifier,cb){
+                        getUnReadMessagesStartWith(messageIdentifier,false,1,0,function(data,dataError,mQmlCallbackError){
+                            ___unReadMessageFilter(data,dataError,mQmlCallbackError,cb);
+                        });
+                    }
+
+                    /*    Pass endMessageIdentifier == null , To loop through all the ReceivedMessages
+                                            Returns {done:1} object when done
+                                      */
+                    streamUnReadMessages: function (startMessageIdentifier,endMessageIdentifier,cb){
+                        if((!magabeClientApp.isValidMessageIdentifier(startMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+                        if((endMessageIdentifier) && (!magabeClientApp.isValidMessageIdentifier(endMessageIdentifier))){
+                            cb(done,OnGetMessagesError.InvalidConversationIdentifierError,0);
+                            return;
+                        }
+
+
+                        cb.callCount = 0;
+
+                        var shouldGetMore = function(messageIdentifier){
+                            if(endMessageIdentifier){
+                                var start = parseInt(String(messageIdentifier).split(':')[2]);
+                                var end = parseInt(String(endMessageIdentifier).split(':')[2]);
+                                if(start >= end){
+                                    return false;
+                                }else{
+                                    return true;
+                                }
+                            } else{
+                                return true;
+                            }
+                        };
+
+                        var getFirstMessage = function(messageIdentifier){
+                            getUnReadMessage(messageIdentifier,function(data,dataError,mQmlCallbackError){
+
+                                var nextMessageIdentifier;
+                                var errorOccurred = error(dataError,mQmlCallbackError);
+                                if(errorOccurred){
+                                    nextMessageIdentifier =  messageIdentifier;
+                                }else{
+                                    nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(nextMessageIdentifier){
+                                        nextMessageIdentifier =  messageIdentifier;
+                                    }
+                                }
+
+                                if(shouldGetMore(nextMessageIdentifier)){
+                                    getNextMessage(nextMessageIdentifier);
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+
+                        var getNextMessage = function(startMessageIdentifier){
+                            getNextUnReadMessage(startMessageIdentifier,function(data,dataError,mQmlCallbackError){
+                                if(!error(dataError,mQmlCallbackError)){
+                                    var  nextMessageIdentifier = onMessageDataReceived(data,dataError,mQmlCallbackError,cb,endMessageIdentifier);
+                                    if(shouldGetMore(nextMessageIdentifier)){
+                                        getNextMessage(nextMessageIdentifier);
+                                    }else{
+                                        cb(done,dataError,mQmlCallbackError)
+                                    }
+                                }else{
+                                    cb(done,dataError,mQmlCallbackError)
+                                }
+                                cb.callCount ++;
+                            });
+                        };
+
+                        getFirstMessage(startMessageIdentifier);
+
+                    }
+
+
+}
